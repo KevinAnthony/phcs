@@ -22,12 +22,12 @@
 import threading
 import time,datetime
 import Queue
-
+exit=False
 try:
     import json
 except ImportError:
-    print "json not found\ninstall with pip json"
-    exit(1)
+    print "json not found\nsudo pip install json"
+    exit=True
 try:
     import gflags
     import httplib2
@@ -36,18 +36,25 @@ try:
     from oauth2client.file import Storage
     from oauth2client.client import OAuth2WebServerFlow
     from oauth2client.tools import run
-
 except ImportError:
-    print "gdata services not found\nhg clone https://google-api-python-client.googlecode.com/hg/ google-api-python-client"
-    exit(1)
+    print "Google API Client not found\nsudo pip install google-api-python-client"
+    exit=True
 try:
     import pyttsx
 except ImportError:
-    print "pyttsx not found\ninstall with pip pyttsx"
+    print "pyttsx not found\nsudo pip install pyttsx"
+    exit=True
 try:
     import requests
 except ImportError:
-    print "requests not foudd\n, install with pip requests"
+    print "requests not found\nsudo pip install requests"
+    exit=True
+try:
+    import dateutil.parser
+except ImportError:
+    print "date utilitis not found\nsudo pip install dateutils"
+if exit:
+    exit(1)
 
 class phi():
     def say(self,string):
@@ -182,31 +189,25 @@ class calendar_thread(threading.Thread):
             events = self.service.events().list(calendarId=id,timeMin=start_date,timeMax=end_date).execute()
             if 'items' in events:
                 for event in events['items']:
-                    event_name = event['summary']
+                    event_name = event['summary'].lstrip()
                     event_start = event['start']
                     if 'date' in event_start:
                         full_events.append(event_name)
                     else:
-                        hour = int(event_start['dateTime'][11:13])
-                        minu = int(event_start['dateTime'][14:16])
-                        ampm = "A.M."
-                        if hour >= 12:
-                            ampm = "P.M."
-                            if hour >= 13:
-                                hour -= 12
-                        elif hour == 0:
-                            hour = 12
-                        if minu == 0:
-                            time = "%d o'clock %s" % (hour,ampm)
+                        time = dateutil.parser.parse(event_start['dateTime']).astimezone(dateutil.tz.tzlocal())
+                        if time.strftime("%p") == "AM":
+                            ampm = "A.M."
                         else:
-                            time = "%d %d %s" % (hour,minu,ampm)
-                        event = {'name':event_name,'time_str':time,'time':event_start['dateTime']}
-                        index = 0
-                        for oldEvent in hour_events:
-                            if oldEvent['time'] < event['time']:
-                                index = hour_events.index(oldEvent)+1
-                                break
-                        hour_events.insert(index,event)
+                            ampm = "P.M."
+                        if time.minute == 0:
+                            timestr = "%d o'clock %s"%(int(time.strftime("%I")),ampm)
+                        else:
+                            timestr = "%d %d %s"%(int(time.strftime("%I")),time.minute,ampm)
+                        event = {'name':event_name,'time_str':timestr,'time':time}
+                        hour_events.append(event)
+       
+        hour_events = sorted(hour_events,key=lambda event: event['time'])
+
         numberEvents = len(full_events)+len(hour_events)
         if numberEvents == 0:
             return "You have nothing planned for today"

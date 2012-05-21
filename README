@@ -7,7 +7,7 @@ This is inspired by jarvis from the iron man movies.
 Right now it gets your time and tempature, along with your google calendar events
 
 Bugs:
-Something is not right with converting the calendar dates to 12 hour time, and it's not sorting them correctly
+No Known Bugs
 
 Things I want todo shortterm:
 I want to soft get the zipcode
