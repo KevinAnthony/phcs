@@ -18,16 +18,19 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-
+import sys,os
 import threading
 import time,datetime
+import argparse
 import Queue
-exit=False
+import ConfigParser
+
+exitError=False
 try:
     import json
 except ImportError:
     print "json not found\nsudo pip install json"
-    exit=True
+    exitError=True
 try:
     import gflags
     import httplib2
@@ -38,36 +41,67 @@ try:
     from oauth2client.tools import run
 except ImportError:
     print "Google API Client not found\nsudo pip install google-api-python-client"
-    exit=True
+    exitError=True
 try:
     import pyttsx
 except ImportError:
     print "pyttsx not found\nsudo pip install pyttsx"
-    exit=True
+    exitError=True
 try:
     import requests
 except ImportError:
     print "requests not found\nsudo pip install requests"
-    exit=True
+    exitError=True
 try:
     import dateutil.parser
 except ImportError:
     print "date utilitis not found\nsudo pip install dateutils"
-if exit:
+if exitError:
     exit(1)
 
 class phi():
     def say(self,string):
         self.say_queue.put(string)
+    
+    def __read_config(self):
+        config = ConfigParser.ConfigParser()
+        config.readfp(open(os.path.abspath(os.path.join(sys.path[0],'settings.py'))))
+        return config
+
+    def __process_command_line_arguments(self,config):
+        parser = argparse.ArgumentParser(description='Persional Home Computrized Secritary')
+        parser.add_argument("-d","--debug",action="store_true",dest="debug",default=config.get("MAIN","DEBUG"),help="Enable Debugging")
+        parser.add_argument("-s","--no-speak",action="store_false",dest="nospeak",default=config.get("MAIN","SPEAK"),help="Disable TTS")
+        parser.add_argument("-z""--zipcode",action="store",dest="zipcode",default=config.get("MAIN","ZIPCODE"),help="Change Zipcode")
+        parser.add_argument("-u","--units",action="store",dest="units",default=config.get("MAIN","UNITS"),help="Change Units Imperial/Metric")
+        
+        parser.add_argument("--wunderground",action="store",dest="wunderground",default=config.get("API","WUNDERGROUND_KEY"),help="Weather Underground API Key")
+        parser.add_argument("--googleid",action="store",dest="googid",default=config.get("API","GOOGLE_ID"),help="Google ID Key")
+        parser.add_argument("--googlesecret",action="store",dest="googsecret",default=config.get("API","GOOGLE_SECRET"),help="Google Secret Key")
+        parser.add_argument("--googledevkey",action="store",dest="googdevkey",default=config.get("API","GOOGLE_DEVEL_KEY"),help="Google Developer Key")
+        
+        parser.parse_args(namespace=self)
+        unit = self.units.lower()
+
+        if unit in ('i','imperial'):
+            self.units='i'
+        elif unit in ('m','metric'):
+            self.units="m"
+        else:
+            print "%s not a recognized value for units\nexiting" % unit
+            exit(1)
+        
 
     def __init__(self):
-        self.__VERSION__ = "0.0.1"
+        self.__VERSION__ = "0.0.2"
+        config = self.__read_config()
+        self.__process_command_line_arguments(config)
         #Locks, Queues and Semaphore
         self.say_queue = Queue.Queue() 
         self.lock = threading.Lock()
         #speak thread
-        self.speak = voice_thread(self)
-        self.speak.start()
+        self.speak_thread = voice_thread(self)
+        self.speak_thread.start()
         #all other threads
         self.taw_thread = time_and_weather_thread(self)
         self.taw_thread.start()
@@ -88,10 +122,14 @@ class voice_thread(threading.Thread):
             while not self.phi.say_queue.empty():
                 self.phi.lock.acquire()
                 string = self.phi.say_queue.get()
-                self.voice_engine.say(string)
-                print "Saying: %s" %string
+                if self.phi.debug:
+                    print "Saying: %s" % string
+                if self.phi.nospeak:
+                    self.voice_engine.say(string)
+                self.phi.say_queue.task_done()
                 self.phi.lock.release()
-            self.voice_engine.runAndWait()
+            if self.phi.nospeak:
+                self.voice_engine.runAndWait()
            
     def join(self,timeout=None):
         self._stopevent.set()
@@ -103,8 +141,7 @@ class time_and_weather_thread(threading.Thread):
         threading.Thread.__init__(self)
         self._stopevent = threading.Event()
         self.phi = phi
-        wunderground_API_KEY = "187769790cf46747"
-        self.base_url = "http://api.wunderground.com/api/%s/" % (wunderground_API_KEY)
+        self.base_url = "http://api.wunderground.com/api/%s/" % (self.phi.wunderground)
 
     def run(self):
         if not self._stopevent.isSet():
@@ -126,14 +163,19 @@ class time_and_weather_thread(threading.Thread):
         return "Good %s" %(greeting) + now.strftime(" it is %A %B %dth.  The Time is now %I %M %p")
 
     def get_weather(self):
-        url = self.base_url+"/conditions/forecast/astronomy/tide/q/08820.json"
+        url = self.base_url+"/conditions/forecast/astronomy/tide/q/"+self.phi.zipcode+".json"
         weather = json.loads(requests.get(url).content)
-        current_temp = weather['current_observation']['temp_f']
+        if self.phi.units == "i":
+            current_temp = weather['current_observation']['temp_f']
+            forcast_high = weather['forecast']['simpleforecast']['forecastday'][0]['high']['fahrenheit']
+            forcast_low = weather['forecast']['simpleforecast']['forecastday'][0]['low']['fahrenheit']
+        if self.phi.units == "m":
+            current_temp = weather['current_observation']['temp_c']
+            forcast_high = weather['forecast']['simpleforecast']['forecastday'][0]['high']['celsius']
+            forcast_low = weather['forecast']['simpleforecast']['forecastday'][0]['low']['celsius']
         current_condition = weather['current_observation']['weather']
         current_humidity = weather['current_observation']['relative_humidity']
         current_string = "It is currently %d degrees and %s with a humidity of %s." %(current_temp,current_condition,current_humidity)
-        forcast_high = weather['forecast']['simpleforecast']['forecastday'][0]['high']['fahrenheit']
-        forcast_low = weather['forecast']['simpleforecast']['forecastday'][0]['low']['fahrenheit']
         forcast_condition = weather['forecast']['simpleforecast']['forecastday'][0]['conditions']
         forcast_string = "Today will have a high of %s degrees low of %s degrees, condistions are: %s." % (forcast_high,forcast_low,forcast_condition)
         return (current_string+" "+forcast_string)
@@ -160,8 +202,8 @@ class calendar_thread(threading.Thread):
     
     def login(self):
         FLOW = OAuth2WebServerFlow(
-            client_id='793289940997.apps.googleusercontent.com',
-            client_secret='icJtNzYqfjUlzkFWlguwbQBE',
+            client_id=self.phi.googid,
+            client_secret=self.phi.googsecret,
             scope='https://www.googleapis.com/auth/calendar',
             user_agent='phi.'+self.phi.__VERSION__)
         storage = Storage('calendar.dat')
@@ -171,7 +213,7 @@ class calendar_thread(threading.Thread):
         http = httplib2.Http()
         http = credentials.authorize(http)
         self.service = build(serviceName='calendar', version='v3', http=http,
-               developerKey='AIzaSyAUgnBETcO9ISvhfKuJMjBvbHYxak7DNcU')
+               developerKey=self.phi.googdevkey)
 
 
 
@@ -182,7 +224,7 @@ class calendar_thread(threading.Thread):
         returnString = ""
         now = datetime.datetime.now()
         start_date = "%d-%02d-%02dT00:00:00.000-04:00" % (now.year,now.month,now.day)
-        end_date = "%d-%02d-%02dT00:00:00.000-04:00" % (now.year,now.month,now.day+2)
+        end_date = "%d-%02d-%02dT23:59:59.000-04:00" % (now.year,now.month,now.day)
         calendars =self.service.calendarList().list().execute()
         for calendar in calendars['items']:
             id = calendar['id']
