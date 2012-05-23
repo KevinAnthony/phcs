@@ -218,13 +218,12 @@ class calendar_thread(threading.Thread):
 
 
     def get_today_events(self):
-        #sorting doesn't work correctly
         full_events=[]
         hour_events=[]
         returnString = ""
         now = datetime.datetime.now()
-        start_date = "%d-%02d-%02dT00:00:00.000-04:00" % (now.year,now.month,now.day)
-        end_date = "%d-%02d-%02dT23:59:59.000-04:00" % (now.year,now.month,now.day)
+        start_date = datetime.datetime(now.year,now.month,now.day,0,0,0,0,tzinfo=dateutil.tz.tzlocal()).isoformat()
+        end_date = datetime.datetime(now.year,now.month,now.day,23,59,59,999999,tzinfo=dateutil.tz.tzlocal()).isoformat()
         calendars =self.service.calendarList().list().execute()
         for calendar in calendars['items']:
             id = calendar['id']
@@ -249,7 +248,6 @@ class calendar_thread(threading.Thread):
                         hour_events.append(event)
        
         hour_events = sorted(hour_events,key=lambda event: event['time'])
-
         numberEvents = len(full_events)+len(hour_events)
         if numberEvents == 0:
             return "You have nothing planned for today"
